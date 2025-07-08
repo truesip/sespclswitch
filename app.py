@@ -239,13 +239,13 @@ def create_pjsua_command(call_config, wav_file):
     cmd_parts = [
         "/usr/local/bin/pjsua",
         "--null-audio",  # Use null audio device
-        # Use the from_number as the SIP identity for caller ID
-        f"--id=sip:{call_config['from']}@{call_config['sip_server']}",
+        # Use the username for SIP identity (for authentication)
+        f"--id=sip:{call_config['username']}@{call_config['sip_server']}",
         f"--registrar=sip:{call_config['sip_server']}:{call_config['sip_port']}",
         f"--realm=asterisk",  # Use the exact realm expected by TrueSIP
         f"--username={call_config['username']}",
         f"--password={call_config['password']}",
-        # Set contact header with the from number
+        # Set contact header with the from number for caller ID
         f"--contact=sip:{call_config['from']}@{call_config['sip_server']}",
         "--log-level=5",  # More detailed logging
         "--reg-timeout=10",  # Quick registration
