@@ -202,11 +202,19 @@ def create_pjsua_command(call_config, wav_file):
     cmd_parts = [
         "/usr/local/bin/pjsua",
         "--null-audio",  # Use null audio device
-        f"--id=sip:{call_config['username']}@{call_config['sip_server']}",
+        # Use the from_number as the SIP identity for caller ID
+        f"--id=sip:{call_config['from']}@{call_config['sip_server']}",
         f"--registrar=sip:{call_config['sip_server']}:{call_config['sip_port']}",
         f"--realm=asterisk",  # Use the exact realm expected by TrueSIP
         f"--username={call_config['username']}",
         f"--password={call_config['password']}",
+        # Set the display name/caller ID to show the from_number
+        f"--display='{call_config['from']}'",
+        # Set contact header with the from number
+        f"--contact=sip:{call_config['from']}@{call_config['sip_server']}",
+        # Add additional headers for caller ID presentation
+        f"--add-header='P-Asserted-Identity: <sip:{call_config['from']}@{call_config['sip_server']}>'",
+        f"--add-header='Remote-Party-ID: <sip:{call_config['from']}@{call_config['sip_server']}>'",
         "--log-level=5",  # More detailed logging
         "--reg-timeout=10",  # Quick registration
         "--duration=30",  # Max call duration
@@ -228,6 +236,7 @@ def execute_sip_call(command, call_config):
         env['PULSE_RUNTIME_PATH'] = '/tmp/pulse'
         
         # Create input commands for PJSUA to make the call
+        # Add custom headers for caller ID presentation
         pjsua_commands = f"""sleep 3000
 m sip:{call_config['to']}@{call_config['sip_server']}
 sleep 15000
