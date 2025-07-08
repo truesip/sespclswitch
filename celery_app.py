@@ -27,8 +27,29 @@ celery_app.conf.update(
     include=['tasks']  # This tells Celery to include tasks from tasks.py
 )
 
+# Add current directory to Python path to ensure modules can be imported
+import sys
+if '/app' not in sys.path:
+    sys.path.insert(0, '/app')
+
+# Create minimal Flask app for Celery tasks
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+
+# Create Flask app instance for Celery tasks
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL', 
+    'postgresql://postgres:password@localhost:5432/voicecall_db'
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database
+from models import db
+db.init_app(app)
+
 # Import tasks to register them
 try:
     import tasks
-except ImportError:
-    pass
+except ImportError as e:
+    print(f"Warning: Could not import tasks: {e}")
