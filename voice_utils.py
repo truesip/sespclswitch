@@ -210,9 +210,6 @@ def create_pjsua_command(call_config, wav_file):
         f"--password={call_config['password']}",
         # Set contact header with the from number
         f"--contact=sip:{call_config['from']}@{call_config['sip_server']}",
-        # Add additional headers for caller ID presentation
-        f"--add-header='P-Asserted-Identity: <sip:{call_config['from']}@{call_config['sip_server']}>'",
-        f"--add-header='Remote-Party-ID: <sip:{call_config['from']}@{call_config['sip_server']}>'",
         "--log-level=5",  # More detailed logging
         "--reg-timeout=10",  # Quick registration
         "--duration=30",  # Max call duration
