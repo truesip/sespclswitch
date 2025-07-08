@@ -20,39 +20,8 @@ import json
 from threading import Thread
 import time
 from dotenv import load_dotenv
-from celery import Celery
-
 # Load environment variables from .env file
 load_dotenv()
-
-# Initialize Celery
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        broker=app.config.get('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
-        result_backend=app.config.get('result_backend', 'redis://localhost:6379/0')
-    )
-    celery.conf.update(app.config)
-    
-    # Optimize Celery for high throughput
-    celery.conf.update(
-        task_serializer='json',
-        accept_content=['json'],
-        result_serializer='json',
-        timezone='UTC',
-        enable_utc=True,
-        worker_prefetch_multiplier=1,
-        task_acks_late=True,
-        worker_max_tasks_per_child=1000,
-    )
-    
-    class ContextTask(celery.Task):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
-    
-    celery.Task = ContextTask
-    return celery
 
 app = Flask(__name__)
 
@@ -68,10 +37,6 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True
 }
 
-# Celery Configuration
-app.config['CELERY_BROKER_URL'] = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-app.config['result_backend'] = os.getenv('result_backend', 'redis://localhost:6379/0')
-
 # Cache Configuration
 app.config['CACHE_TYPE'] = 'redis'
 app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
@@ -79,9 +44,6 @@ app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL', 'redis://localhost:6379/1
 # Initialize extensions
 from models import db, Call
 db.init_app(app)
-
-# Initialize Celery after app configuration
-celery = make_celery(app)
 
 # Configure caching for frequently accessed data
 cache = Cache(app)
@@ -453,8 +415,8 @@ def make_voice_call():
         db.session.commit()
         
         # Queue the call for async processing
-        from tasks import tts_and_call_task
-        task = tts_and_call_task.delay(call.id)
+        from celery_app import celery_app
+        task = celery_app.send_task('tasks.tts_and_call_task', args=[call.id])
         
         # Update call with task ID
         call.task_id = task.id
@@ -488,7 +450,8 @@ def get_call_status(call_id):
         # Get task status if available
         task_status = None
         if call.task_id:
-            task_result = celery.AsyncResult(call.task_id)
+            from celery_app import celery_app
+            task_result = celery_app.AsyncResult(call.task_id)
             task_status = task_result.status
         
         response_data = call.to_dict()
@@ -602,8 +565,8 @@ def bulk_voice_calls():
             db.session.flush()  # Get ID without committing
             
             # Queue the call
-            from tasks import tts_and_call_task
-            task = tts_and_call_task.delay(call.id)
+            from celery_app import celery_app
+            task = celery_app.send_task('tasks.tts_and_call_task', args=[call.id])
             call.task_id = task.id
             
             call_ids.append(call.id)
