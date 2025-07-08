@@ -1,7 +1,7 @@
-# Voice Call API - Scaling Guide for 1 Million Calls
+# SESPCLSwitch - Scaling Guide for 1 Million Calls
 
 ## Overview
-This guide explains how to scale the Voice Call API to handle 1 million calls efficiently using the optimized architecture.
+This guide explains how to scale the SESPCLSwitch to handle 1 million calls efficiently using the optimized architecture.
 
 ## Current Optimizations Implemented
 
@@ -38,23 +38,23 @@ This guide explains how to scale the Voice Call API to handle 1 million calls ef
 #### Horizontal Scaling (Recommended)
 ```bash
 # Deploy multiple instances behind load balancer
-docker-compose up --scale voice-call-api=10
+docker-compose up --scale sespclswitch=10
 ```
 
 #### Load Balancer Configuration
 ```nginx
-upstream voice_call_api {
+upstream sespclswitch {
     least_conn;
-    server voice-call-api-1:5000;
-    server voice-call-api-2:5000;
-    server voice-call-api-3:5000;
+    server sespclswitch-1:5000;
+    server sespclswitch-2:5000;
+    server sespclswitch-3:5000;
     # Add more instances as needed
 }
 
 server {
     listen 80;
     location / {
-        proxy_pass http://voice_call_api;
+        proxy_pass http://sespclswitch;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
@@ -82,10 +82,10 @@ python app.py
 docker-compose up -d --build
 
 # Scale to multiple instances
-docker-compose up -d --scale voice-call-api=5
+docker-compose up -d --scale sespclswitch=5
 
 # Monitor logs
-docker-compose logs -f voice-call-api
+docker-compose logs -f sespclswitch
 ```
 
 ### 3. **Kubernetes Deployment** (For Large Scale)
@@ -93,20 +93,20 @@ docker-compose logs -f voice-call-api
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: voice-call-api
+  name: sespclswitch
 spec:
   replicas: 20  # Scale as needed
   selector:
     matchLabels:
-      app: voice-call-api
+      app: sespclswitch
   template:
     metadata:
       labels:
-        app: voice-call-api
+        app: sespclswitch
     spec:
       containers:
-      - name: voice-call-api
-        image: voice-call-api:latest
+      - name: sespclswitch
+        image: sespclswitch:latest
         ports:
         - containerPort: 5000
         env:
