@@ -37,16 +37,16 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
 # Create Flask app instance for Celery tasks
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+flask_app = Flask(__name__)
+flask_app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
     'DATABASE_URL', 
     'postgresql://postgres:password@localhost:5432/voicecall_db'
 )
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+flask_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize database
 from models import db
-db.init_app(app)
+db.init_app(flask_app)
 
 # Import tasks to register them
 try:

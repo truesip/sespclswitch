@@ -21,7 +21,7 @@ def tts_and_call_task(self, call_id):
     
     # Import Flask app for database context from celery_app
     try:
-        from celery_app import app
+        from celery_app import flask_app as app
     except ImportError as e:
         logger.error(f"Could not import Flask app from celery_app: {e}")
         return 'Error: Flask app not available for database context'
