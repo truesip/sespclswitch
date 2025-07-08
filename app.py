@@ -30,7 +30,7 @@ def make_celery(app):
     celery = Celery(
         app.import_name,
         broker=app.config.get('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
-        backend=app.config.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+        result_backend=app.config.get('result_backend', 'redis://localhost:6379/0')
     )
     celery.conf.update(app.config)
     
@@ -70,7 +70,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 
 # Celery Configuration
 app.config['CELERY_BROKER_URL'] = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-app.config['CELERY_RESULT_BACKEND'] = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+app.config['result_backend'] = os.getenv('result_backend', 'redis://localhost:6379/0')
 
 # Cache Configuration
 app.config['CACHE_TYPE'] = 'redis'
