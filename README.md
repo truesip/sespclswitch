@@ -1,7 +1,7 @@
-# Voice Call API
+# SESPCLSwitch
 
 ## Overview
-The Voice Call API allows you to integrate voice calling capabilities into your applications using various technologies.
+The SESPCLSwitch allows you to integrate voice calling capabilities into your applications using various technologies.
 
 ## Features
 - Initiate voice calls

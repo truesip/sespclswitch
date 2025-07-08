@@ -4,8 +4,9 @@ FROM ubuntu:22.04
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies including PJSIP tools
+# Install system dependencies including PJSIP tools, Redis, and Supervisor
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -17,6 +18,9 @@ RUN apt-get update && apt-get install -y \
     wget \
     build-essential \
     software-properties-common \
+    redis-server \
+    supervisor \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PJSIP from source for better compatibility
@@ -44,6 +48,9 @@ RUN apt-get update && apt-get install -y \
     sox \
     && rm -rf /var/lib/apt/lists/*
 
+# Configure Redis
+RUN mkdir -p /var/lib/redis && chown redis:redis /var/lib/redis
+
 # Create application directory
 WORKDIR /app
 
@@ -53,21 +60,25 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Copy configuration files
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY gunicorn.conf.py /app/
+
 # Copy application code
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/audio_files /app/logs /tmp/audio
+RUN mkdir -p /app/audio_files /app/logs /tmp/audio /app/temp_audio
 
 # Set permissions
 RUN chmod +x /app/entrypoint.sh || true
 
-# Expose port
-EXPOSE 5000
+# Expose ports
+EXPOSE 5000 6379
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-# Run the application
-CMD ["python3", "app.py"]
+# Run with Supervisor to manage all processes
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

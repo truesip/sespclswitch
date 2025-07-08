@@ -1,9 +1,11 @@
 """
-Voice Call API Server
+SESPCLSwitch Server
 A production-ready Flask API for making voice calls via SIP using TrueSIP
 """
 
 from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_caching import Cache
 import os
 import requests
 import tempfile
@@ -18,9 +20,71 @@ import json
 from threading import Thread
 import time
 from dotenv import load_dotenv
+from celery import Celery
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Initialize Celery
+def make_celery(app):
+    celery = Celery(
+        app.import_name,
+        broker=app.config.get('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
+        backend=app.config.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+    )
+    celery.conf.update(app.config)
+    
+    # Optimize Celery for high throughput
+    celery.conf.update(
+        task_serializer='json',
+        accept_content=['json'],
+        result_serializer='json',
+        timezone='UTC',
+        enable_utc=True,
+        worker_prefetch_multiplier=1,
+        task_acks_late=True,
+        worker_max_tasks_per_child=1000,
+    )
+    
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+    
+    celery.Task = ContextTask
+    return celery
+
+app = Flask(__name__)
+
+# Database Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL', 
+    'postgresql://postgres:password@localhost:5432/voicecall_db'
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': 20,
+    'pool_recycle': 300,
+    'pool_pre_ping': True
+}
+
+# Celery Configuration
+app.config['CELERY_BROKER_URL'] = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+app.config['CELERY_RESULT_BACKEND'] = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+# Cache Configuration
+app.config['CACHE_TYPE'] = 'redis'
+app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+
+# Initialize extensions
+from models import db, Call
+db.init_app(app)
+
+# Initialize Celery after app configuration
+celery = make_celery(app)
+
+# Configure caching for frequently accessed data
+cache = Cache(app)
 
 # Configure logging
 logging.basicConfig(
@@ -29,7 +93,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
 
 # Configuration from environment variables
 SIP_TRUNK_IP = os.getenv("SIP_TRUNK_IP", "sip.truesip.net")
@@ -356,7 +419,7 @@ def health_check():
 
 @app.route('/voice/call', methods=['POST'])
 def make_voice_call():
-    """Main API endpoint for voice calls"""
+    """Main API endpoint for voice calls - Async processing"""
     try:
         data = request.get_json()
         
@@ -375,41 +438,40 @@ def make_voice_call():
         from_number = data['FromNumber']
         text = data['Text']
         audio_url = data.get('AudioUrl')  # Optional
+        priority = data.get('Priority', 1)  # 1=high, 2=medium, 3=low
         
-        # Generate unique call ID
-        call_id = str(uuid.uuid4())
+        # Create call record in database
+        call = Call(
+            to_number=to_number,
+            from_number=from_number,
+            text=text,
+            audio_url=audio_url,
+            status='pending'
+        )
         
-        # Create temporary audio file
-        temp_dir = tempfile.mkdtemp()
-        audio_file = os.path.join(temp_dir, f"call_{call_id}.mp3")
+        db.session.add(call)
+        db.session.commit()
         
-        # Use provided audio URL or convert text to speech
-        if audio_url:
-            # Download audio from URL
-            response = requests.get(audio_url)
-            if response.status_code == 200:
-                with open(audio_file, 'wb') as f:
-                    f.write(response.content)
-            else:
-                return jsonify({"error": "Failed to download audio from URL"}), 400
-        else:
-            # Convert text to speech
-            if not text_to_speech(text, audio_file):
-                return jsonify({"error": "Text-to-speech conversion failed"}), 500
+        # Queue the call for async processing
+        from tasks import tts_and_call_task
+        task = tts_and_call_task.delay(call.id)
         
-        # Initiate SIP call
-        if initiate_sip_call(to_number, from_number, audio_file):
-            return jsonify({
-                "success": True,
-                "call_id": call_id,
-                "to_number": to_number,
-                "from_number": from_number,
-                "text": text,
-                "timestamp": datetime.now().isoformat(),
-                "audio_file": audio_file
-            })
-        else:
-            return jsonify({"error": "Failed to initiate SIP call"}), 500
+        # Update call with task ID
+        call.task_id = task.id
+        db.session.commit()
+        
+        logger.info(f"Call queued for processing: {call.id}")
+        
+        return jsonify({
+            "success": True,
+            "call_id": call.id,
+            "task_id": task.id,
+            "status": "queued",
+            "to_number": to_number,
+            "from_number": from_number,
+            "timestamp": datetime.now().isoformat(),
+            "estimated_processing_time": "30-60 seconds"
+        }), 202  # Accepted
             
     except Exception as e:
         logger.error(f"API call failed: {str(e)}")
@@ -417,22 +479,34 @@ def make_voice_call():
 
 @app.route('/voice/status/<call_id>', methods=['GET'])
 def get_call_status(call_id):
-    """Get call status by ID"""
-    # This would typically query a database for call status
-    # For now, return a basic response
-    return jsonify({
-        "call_id": call_id,
-        "status": "completed",
-        "timestamp": datetime.now().isoformat()
-    })
+    """Get call status by ID from database"""
+    try:
+        call = Call.query.get(call_id)
+        if not call:
+            return jsonify({"error": "Call not found"}), 404
+        
+        # Get task status if available
+        task_status = None
+        if call.task_id:
+            task_result = celery.AsyncResult(call.task_id)
+            task_status = task_result.status
+        
+        response_data = call.to_dict()
+        response_data['task_status'] = task_status
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"Status check failed: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/info', methods=['GET'])
 def api_info():
     """Get API information and available endpoints"""
     return jsonify({
-        "name": "Voice Call API",
+        "name": "SESPCLSwitch",
         "version": "1.0.0",
-        "description": "Production-ready Voice Call API using SIP and Text-to-Speech",
+        "description": "Production-ready SESPCLSwitch using SIP and Text-to-Speech",
         "endpoints": {
             "GET /health": "Health check endpoint",
             "POST /voice/call": "Make a voice call",
@@ -452,14 +526,112 @@ def api_info():
             "sip_server": SIP_TRUNK_IP,
             "sip_port": SIP_TRUNK_PORT,
             "tts_service": TTS_SERVICE
+        },
+        "metrics": {
+            "GET /api/metrics": "System performance metrics",
+            "POST /voice/bulk": "Bulk call operations"
         }
     })
+
+@app.route('/api/metrics', methods=['GET'])
+def get_metrics():
+    """Get system performance metrics"""
+    try:
+        # Get call statistics
+        total_calls = Call.query.count()
+        pending_calls = Call.query.filter_by(status='pending').count()
+        processing_calls = Call.query.filter_by(status='processing').count()
+        completed_calls = Call.query.filter_by(status='completed').count()
+        failed_calls = Call.query.filter_by(status='failed').count()
+        
+        # Calculate success rate
+        success_rate = (completed_calls / total_calls * 100) if total_calls > 0 else 0
+        
+        return jsonify({
+            "timestamp": datetime.now().isoformat(),
+            "calls": {
+                "total": total_calls,
+                "pending": pending_calls,
+                "processing": processing_calls,
+                "completed": completed_calls,
+                "failed": failed_calls,
+                "success_rate": round(success_rate, 2)
+            },
+            "system": {
+                "status": "operational",
+                "version": "2.0.0",
+                "celery_workers": "Active"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Metrics failed: {str(e)}")
+        return jsonify({"error": "Failed to get metrics"}), 500
+
+@app.route('/voice/bulk', methods=['POST'])
+def bulk_voice_calls():
+    """Handle bulk voice call requests"""
+    try:
+        data = request.get_json()
+        calls_data = data.get('calls', [])
+        
+        if not calls_data or len(calls_data) > 1000:  # Limit bulk size
+            return jsonify({
+                "error": "Invalid bulk request",
+                "max_calls": 1000
+            }), 400
+        
+        call_ids = []
+        task_ids = []
+        
+        for call_data in calls_data:
+            # Validate each call
+            required_fields = ['ToNumber', 'FromNumber', 'Text']
+            if not all(field in call_data for field in required_fields):
+                continue
+            
+            # Create call record
+            call = Call(
+                to_number=call_data['ToNumber'],
+                from_number=call_data['FromNumber'],
+                text=call_data['Text'],
+                audio_url=call_data.get('AudioUrl'),
+                status='pending'
+            )
+            
+            db.session.add(call)
+            db.session.flush()  # Get ID without committing
+            
+            # Queue the call
+            from tasks import tts_and_call_task
+            task = tts_and_call_task.delay(call.id)
+            call.task_id = task.id
+            
+            call_ids.append(call.id)
+            task_ids.append(task.id)
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "queued_calls": len(call_ids),
+            "call_ids": call_ids[:10],  # Return first 10 for reference
+            "total_calls": len(call_ids),
+            "timestamp": datetime.now().isoformat()
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Bulk call failed: {str(e)}")
+        return jsonify({"error": "Bulk operation failed"}), 500
+
+# Initialize database tables
+with app.app_context():
+    db.create_all()
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'false').lower() == 'true'
     
-    logger.info(f"Starting Voice Call API on port {port}")
+    logger.info(f"Starting SESPCLSwitch on port {port}")
     logger.info(f"SIP Server: {SIP_TRUNK_IP}:{SIP_TRUNK_PORT}")
     logger.info(f"TTS Service: {TTS_SERVICE}")
     

@@ -1,7 +1,38 @@
 version: '3.8'
 
 services:
-  voice-call-api:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: voicecall_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - sespclswitch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - sespclswitch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  sespclswitch:
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +40,10 @@ services:
       - "5000:5000"
     environment:
       - PORT=5000
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/voicecall_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/1
       - SIP_TRUNK_IP=${SIP_TRUNK_IP:-sip.truesip.net}
       - SIP_TRUNK_PORT=${SIP_TRUNK_PORT:-5060}
       - SIP_USERNAME=${SIP_USERNAME:-12156}
@@ -20,19 +55,39 @@ services:
       - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
       - AWS_SECRET_KEY=${AWS_SECRET_KEY}
       - DEBUG=${DEBUG:-false}
+      - MAX_WORKERS=${MAX_WORKERS:-20}
+      - MAX_CONCURRENT_CALLS=${MAX_CONCURRENT_CALLS:-1000}
     volumes:
       - ./audio_files:/app/audio_files
       - ./logs:/app/logs
+      - ./temp_audio:/app/temp_audio
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
-      - voice-api-network
+      - sespclswitch-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+volumes:
+  postgres_data:
+  redis_data:
 
 networks:
-  voice-api-network:
+  sespclswitch-network:
     driver: bridge
