@@ -1,0 +1,9 @@
+Flask==2.3.3
+requests==2.31.0
+pydub==0.25.1
+boto3==1.28.57
+azure-cognitiveservices-speech==1.32.1
+google-cloud-texttospeech==2.16.3
+gunicorn==21.2.0
+python-dotenv==1.0.0
+Werkzeug==2.3.7

@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  voice-call-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - SIP_TRUNK_IP=${SIP_TRUNK_IP:-sip.truesip.net}
+      - SIP_TRUNK_PORT=${SIP_TRUNK_PORT:-5060}
+      - SIP_USERNAME=${SIP_USERNAME:-12156}
+      - SIP_PASSWORD=${SIP_PASSWORD:-1C36na9C}
+      - TTS_SERVICE=${TTS_SERVICE:-espeak}
+      - GOOGLE_TTS_API_KEY=${GOOGLE_TTS_API_KEY}
+      - AZURE_TTS_KEY=${AZURE_TTS_KEY}
+      - AZURE_TTS_REGION=${AZURE_TTS_REGION}
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY}
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ./audio_files:/app/audio_files
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - voice-api-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  voice-api-network:
+    driver: bridge
