@@ -7,7 +7,7 @@ import requests
 import json
 import time
 
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = "http://167.172.135.7:5000"
 
 def make_real_call(to_number, from_number, message):
     """Make a real phone call"""
