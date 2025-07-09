@@ -205,8 +205,8 @@ def create_pjsua_command(call_config, wav_file):
         # Use the verified FROM number for SIP identity (for caller ID)
         f"--id=sip:{call_config['from']}@{call_config['sip_server']}",
         f"--registrar=sip:{call_config['sip_server']}:{call_config['sip_port']}",
-        f"--realm=us.wavix.net",  # Use the exact realm expected by Wavix
-        f"--proxy=sip:us.wavix.net:5060",  # Set proxy server
+        f"--realm=asterisk",  # Use the exact realm expected by TrueSIP
+        f"--proxy=sip:sip.truesip.net:5060",  # Set proxy server
         # Keep original username for authentication
         f"--username={call_config['username']}",
         f"--password={call_config['password']}",
