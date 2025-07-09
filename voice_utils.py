@@ -250,23 +250,49 @@ q
             env=env
         )
         
-        if result.returncode == 0:
-            logger.info(f"SIP call completed successfully: {call_config['from']} -> {call_config['to']}")
-        else:
-            logger.warning(f"SIP call ended with code {result.returncode}")
-            
-        # Log output for debugging
+        # Check SIP response codes in the output
+        call_successful = False
         if result.stdout:
+            output = result.stdout
             logger.info(f"PJSUA stdout: {result.stdout}")  # Full output
+            
+            # Check for successful call indicators
+            if "200 OK" in output and "CONFIRMED" in output:
+                call_successful = True
+                logger.info(f"SIP call successful: {call_config['from']} -> {call_config['to']}")
+            elif "484" in output:
+                logger.error(f"SIP call failed - 484 Address incomplete: {call_config['from']} -> {call_config['to']}")
+                raise Exception("484 Address incomplete - Invalid destination number")
+            elif "403" in output:
+                logger.error(f"SIP call failed - 403 Forbidden: {call_config['from']} -> {call_config['to']}")
+                raise Exception("403 Forbidden - Authentication or authorization failed")
+            elif "404" in output:
+                logger.error(f"SIP call failed - 404 Not Found: {call_config['from']} -> {call_config['to']}")
+                raise Exception("404 Not Found - Destination not reachable")
+            elif "DISCONNECTED" in output:
+                logger.warning(f"SIP call disconnected: {call_config['from']} -> {call_config['to']}")
+                # Check if it was a successful call that ended normally
+                if "conn in" in output and not any(error in output for error in ["484", "403", "404", "500"]):
+                    call_successful = True
+                    logger.info(f"SIP call completed normally: {call_config['from']} -> {call_config['to']}")
+                else:
+                    raise Exception("Call failed or was rejected")
+            else:
+                logger.warning(f"SIP call status unclear: {call_config['from']} -> {call_config['to']}")
+                
         if result.stderr:
             logger.warning(f"PJSUA stderr: {result.stderr}")  # Full output
             
+        if not call_successful:
+            raise Exception("SIP call did not complete successfully")
+            
     except subprocess.TimeoutExpired:
         logger.info(f"SIP call completed (timeout) - {call_config['from']} -> {call_config['to']}")
+        raise Exception("SIP call timed out")
     except Exception as e:
         logger.error(f"SIP call execution failed: {str(e)}")
-        # Fallback to simulation
-        simulate_call(call_config)
+        # Don't fallback to simulation - raise the error so it's properly logged
+        raise e
 
 def simulate_call(call_config):
     """Simulate SIP call for local testing"""
