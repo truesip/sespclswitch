@@ -206,8 +206,11 @@ def create_pjsua_command(call_config, wav_file):
         f"--id=sip:{call_config['from']}@{call_config['sip_server']}",
         f"--registrar=sip:{call_config['sip_server']}:{call_config['sip_port']}",
         f"--realm=asterisk",  # Use the exact realm expected by TrueSIP
+        # Keep original username for authentication
         f"--username={call_config['username']}",
         f"--password={call_config['password']}",
+        # Add fromuser parameter for caller ID presentation
+        f"--fromuser={call_config['from']}",
         # Set contact header with the from number for caller ID
         f"--contact=sip:{call_config['from']}@{call_config['sip_server']}",
         "--log-level=5",  # More detailed logging
